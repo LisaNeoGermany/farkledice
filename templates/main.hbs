@@ -1,0 +1,105 @@
+{{#if started}}
+<!-- Player Header -->
+<div class="farkle-player-header">
+    <img src="{{currentUserURL}}" class="farkle-player-avatar" alt="{{currentPlayer.name}}"/>
+    <div class="farkle-player-info">
+        <div class="farkle-player-name">{{currentPlayer.name}}</div>
+        <div class="farkle-player-meta">
+            <i class="fas fa-user"></i> {{currentUser.name}} •
+            <i class="fas fa-bullseye"></i> {{localize 'FARKLE.targetScore'}}: {{targetScore}}
+        </div>
+    </div>
+    {{#if isFarkle}}
+    <div class="farkle-status-badge farkled">
+        <i class="fas fa-skull-crossbones"></i> Farkle!
+    </div>
+    {{else if gameState.isHotDice}}
+    <div class="farkle-status-badge hot-dice" data-tooltip="FARKLE.hotDice">
+        <i class="fas fa-fire"></i> Hot Dice!
+    </div>
+    {{/if}}
+</div>
+
+<!-- Action Buttons -->
+<div class="farkle-flexrow" style="gap: 8px; margin-bottom: 16px;">
+    {{#if allowedToRoll}}
+        <button type="button" class="primary {{ifThen myTurn '' 'farkle-hidden'}}" data-action="rollDice" data-tooltip="FARKLE.roll">
+            <i class="fas fa-dice"></i> {{localize 'FARKLE.roll'}}
+        </button>
+    {{/if}}
+    {{#if myTurn}}
+        <button type="button" class="success" data-tooltip="FARKLE.endTurn" data-action="endTurn">
+            <i class="fas fa-arrow-right"></i> {{localize 'FARKLE.endTurn'}}
+        </button>
+    {{else}}
+        {{#if isGm}}
+            <button type="button" class="careful" data-tooltip="FARKLE.endTurn" data-action="endTurn">
+                <i class="fas fa-arrow-right"></i> {{localize 'FARKLE.forceTurn'}}
+            </button>
+        {{/if}}
+    {{/if}}
+    {{#if canManageGame}}
+    <div style="margin-left: auto; display: flex; gap: 8px;">
+        <button type="button" class="icon" data-action="startFarkle" data-tooltip="FARKLE.start">
+            <i class="fas fa-flag-checkered"></i>
+        </button>
+        <button type="button" class="icon" data-action="endFarkle" data-tooltip="FARKLE.close">
+            <i class="fas fa-xmark"></i>
+        </button>
+    </div>
+    {{/if}}
+</div>
+
+<!-- Dice Area -->
+<div class="farkle-dice-area">
+    {{#each currentDice as |die index|}}
+    <div class="farkleDie {{die.cssClass}}" data-die="{{die.die}}" data-index="{{index}}" data-action="keepDie">
+        {{die.die}}
+    </div>
+    {{/each}}
+</div>
+
+<!-- Score Display -->
+<div class="farkle-score-container">
+    <!-- Current Turn Score -->
+    <div class="farkle-current-score">
+        <div class="farkle-current-score-label">{{localize 'FARKLE.currentPoints'}}</div>
+        <div class="farkle-current-score-value">{{currentTurnPoints}}</div>
+    </div>
+
+    <!-- Player Scores as compact cards -->
+    <div class="farkle-player-scores farkle-player-card-grid">
+        {{#each playerCards as |player|}}
+        <article class="farkle-player-card {{ifThen player.active 'active' ''}}">
+            <div class="farkle-player-card-head">
+                <img class="farkle-player-card-avatar" src="{{player.image}}" alt="{{player.name}}"/>
+                <div class="farkle-player-card-name" title="{{player.name}}">
+                    {{#if player.active}}<i class="fas fa-chevron-right"></i>{{/if}}
+                    {{player.name}}
+                </div>
+            </div>
+            <div class="farkle-player-card-score">{{player.score}}</div>
+            <div class="farkle-player-progress">
+                <div class="farkle-player-progress-fill" style="width: {{player.percent}}%;"></div>
+            </div>
+            <div class="farkle-player-progress-label">
+                <span>{{player.score}} / {{player.target}}</span>
+                <span>{{player.percent}}%</span>
+            </div>
+        </article>
+        {{/each}}
+    </div>
+</div>
+
+{{else}}
+<!-- No Game State -->
+<div class="farkle-empty-state">
+    <i class="fas fa-dice"></i>
+    <p>{{localize 'FARKLE.noGame'}}</p>
+    {{#if canManageGame}}
+    <button type="button" class="primary" data-action="startFarkle">
+        <i class="fas fa-flag-checkered"></i> {{localize 'FARKLE.start'}}
+    </button>
+    {{/if}}
+</div>
+{{/if}}

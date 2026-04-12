@@ -1,0 +1,26 @@
+<div class="farkle-scrollable">
+    <div class="farkle-flexrow" style="margin-bottom: 15px;">
+        <div>
+            <p>{{localize 'FARKLE.selectYourCharacter'}}</p>
+            {{#if stake}}
+                <p><strong>{{localize 'FARKLE.stake'}}:</strong> {{stake}} {{localize 'FARKLE.coins'}}</p>
+            {{/if}}
+        </div>
+    </div>
+    
+    <div class="flexcol">
+        <div class="farkle-flexrow playerHeader">
+            <div class="farkle-flex0" style="min-width:60px"></div>
+            <div>{{localize 'FARKLE.player'}}</div>
+            <div>{{localize 'FARKLE.character'}}</div>
+            <div class="farkle-flex0"></div>
+        </div>
+        {{#each players as |player|}}
+            {{> modules/farkledice/templates/playerrow.hbs player=player players=../players stake=../stake}}
+        {{/each}}
+    </div>
+    <div class="farkle-flexrow">
+        <button type="button" data-action="confirmSelection"><i class="fas fa-check"></i> {{localize 'ok'}}</button>
+        <button type="button" data-action="cancelSelection"><i class="fas fa-xmark"></i> {{localize 'cancel'}}</button>
+    </div>
+</div>

@@ -1,0 +1,1193 @@
+import { FarkleApplication } from "./FarkleApplication.js";
+import { moduleName, moduleDebug } from "./utils.js";
+import FarkleHelp from "./FarkleHelp.js";
+import PlayerPick from "./PlayerPick.js";
+import PickLoadedDice from "./PickLoadedDice.js";
+import { achievementManager } from "./Achievements.js";
+import { soundEffects } from "./SoundEffects.js";
+import VerwaltungClient from "./VerwaltungClient.js";
+
+const { mergeObject, duplicate, isEmpty, getProperty } = foundry.utils;
+const { DialogV2 } = foundry.applications.api;
+
+export default class FarkleScorer extends FarkleApplication {
+    static DEFAULT_OPTIONS = {
+        id: "farkle-scorer-{id}",
+        classes: ["farkle-scorer"],
+        window: {
+            title: "Farkle",
+            resizable: true,
+            contentClasses: ["standard-form"]
+        },
+        position: {
+            width: 600,
+            height: "auto"
+        }
+    };
+
+    static PARTS = {
+        main: {
+            id: "main",
+            root: true,
+            template: "modules/farkledice/templates/main.hbs"
+        }
+    };
+
+    constructor(gameId, options = {}) {
+        super(options);
+        this.gameId = gameId || foundry.utils.randomID();
+        this._gameState = {};
+        this.cheats = {};
+        this._hasShownLoadedDiceDialog = false;
+    }
+
+    _shouldRender() {
+        const users = this._gameState?.users || [];
+        const isParticipant = users.some(u => u.id === game.user.id);
+        const isCreator = this._gameState?.createdBy === game.user.id;
+        // Render if I am in the game, I created it, I am a spectator, or I already have the window open.
+        return isParticipant || isCreator || this.isSpectator || this.rendered === true;
+    }
+
+    get title() {
+        if (this.gameState && this.gameState.gameName) {
+            const spectatorSuffix = this.isSpectator ? ` (${game.i18n.localize("FARKLE.spectator")})` : "";
+            return `Farkle - ${this.gameState.gameName}${spectatorSuffix}`;
+        }
+        return "Farkle";
+    }
+
+    get gameState() {
+        return this._gameState;
+    }
+
+    close(options) {
+        if (this._responseTimeout) {
+            clearTimeout(this._responseTimeout);
+            this._responseTimeout = null;
+        }
+        this.isSpectator = false;
+        return super.close(options);
+    }
+
+    set gameState(value) {
+        const sync = !value.skipSync;
+        if (!sync) delete value.skipSync;
+
+        const mergedState = mergeObject(this._gameState, value);
+        // Ensure arrays are replaced, not merged index-by-index.
+        for (const [key, val] of Object.entries(value)) {
+            if (Array.isArray(val)) {
+                mergedState[key] = [...val];
+            }
+        }
+        this._gameState = mergedState;
+
+        // Check if I am still part of the game
+        const amIParticipant = (this._gameState.users || []).some(u => u.id === game.user.id);
+        const amICreator = this._gameState.createdBy === game.user.id;
+        
+        if (amIParticipant) this.isSpectator = false;
+        
+        if (!amIParticipant && !amICreator && !this.isSpectator && this.rendered) {
+            moduleDebug("User is no longer a participant and not a spectator. Closing game window.");
+            this.close();
+            return;
+        }
+
+        if (sync) {
+            game.socket.emit(`module.${moduleName}`, {
+                type: 'sync',
+                gameId: this.gameId,
+                payload: {
+                    gameState: this._gameState,
+                    userId: game.user.id,
+                },
+            });
+
+            // Benachrichtige Lobby über Update
+            game.socket.emit(`module.${moduleName}`, {
+                type: 'lobby-update',
+                gameId: this.gameId
+            });
+        }
+        
+        // Resume timeout if we are the creator and it's not running but should be
+        if (this._gameState.createdBy === game.user.id && this._gameState.queryStartedAt && !this._responseTimeout && this._gameState.pendingResponses) {
+            const now = Date.now();
+            const elapsed = now - this._gameState.queryStartedAt;
+            const remaining = 30000 - elapsed;
+            
+            if (remaining > 0) {
+                moduleDebug(`Resuming play-again timeout: ${Math.round(remaining/1000)}s left`);
+                this._responseTimeout = setTimeout(() => {
+                    if (this._gameState.pendingResponses) {
+                        this._finalizeNewRound();
+                    }
+                }, remaining);
+            } else {
+                this._finalizeNewRound();
+            }
+        }
+
+        const event = this._gameState.event;
+        if (event) {
+            this._gameState.event = null;
+            this.handleEvent(event);
+        }
+        if (this._shouldRender()) this.render(true);
+    }
+
+    _initialState = {
+        userTurn: null,
+        users: [],
+        currentDice: [],
+        keptDice: [],
+        remainingRolls: 3,
+        rollLength: 6,
+        score: 0,
+        keepIndex: []
+    }
+
+    _gameState = {}
+
+
+    socketEvents(data) {
+        switch (data.type) {
+            case 'sync':
+                if (data.payload.userId !== game.user.id) {
+                    const newState = data.payload.gameState || {};
+                    const users = newState.users || [];
+                    const isParticipant = users.some(u => u.id === game.user.id);
+                    const isCreator = newState.createdBy === game.user.id;
+                    if (isParticipant || isCreator || this.isSpectator || this.rendered === true) {
+                        newState.skipSync = true;
+                        this.gameState = newState;
+                    } else {
+                        // Update state silently for lobby listing. Do not render a game window.
+                        this._gameState = mergeObject(this._gameState, newState);
+                    }
+                }
+                break;
+
+            case 'play-again-response':
+                if (this.gameState.createdBy === game.user.id) {
+                    this._handlePlayAgainResponse(data.payload.userId, data.payload.accepted);
+                }
+                break;
+
+            case 'close':
+                this.close();
+                break;
+            default:
+                break;
+        }
+    }
+
+    _handlePlayAgainResponse(userId, accepted) {
+        const responses = { ...(this.gameState.pendingResponses || {}) };
+        responses[userId] = accepted;
+        
+        const userName = game.users.get(userId)?.name || "Unknown";
+        if (accepted) {
+            ui.notifications.info(game.i18n.format("FARKLE.playerAccepted", { name: userName }));
+        } else {
+            ui.notifications.warn(game.i18n.format("FARKLE.playerDeclined", { name: userName }));
+        }
+
+        // Update state to sync with everyone (shows GM progress)
+        this.gameState = { pendingResponses: responses };
+        
+        this._checkAllResponsesReceived();
+    }
+
+    _checkAllResponsesReceived() {
+        const responses = this.gameState.pendingResponses || {};
+        
+        // Only count players who are actually active/online to avoid getting stuck
+        const activeParticipantIds = (this.gameState.users || [])
+            .map(u => u.id)
+            .filter(id => game.users.get(id)?.active);
+            
+        const allAnswered = activeParticipantIds.every(id => typeof responses[id] !== 'undefined');
+        
+        if (allAnswered) {
+            if (this._responseTimeout) {
+                clearTimeout(this._responseTimeout);
+                this._responseTimeout = null;
+            }
+            this._finalizeNewRound();
+        }
+    }
+
+    async _finalizeNewRound() {
+        if (this._responseTimeout) {
+            clearTimeout(this._responseTimeout);
+            this._responseTimeout = null;
+        }
+
+        const responses = this.gameState.pendingResponses;
+        if (!responses) return;
+        
+        const stake = Number(this.gameState.stake || 0);
+        const newTarget = this.gameState.nextTargetScore || this.gameState.targetScore || 10000;
+        const initialUserCount = (this.gameState.users || []).length;
+        let newlyChargedUsers = [];
+
+        const refundNewRoundCharges = async (usersToRefund) => {
+            if (stake <= 0 || !Array.isArray(usersToRefund) || usersToRefund.length === 0) return;
+            await Promise.all(usersToRefund
+                .filter(u => u?.verwaltungId)
+                .map(u => VerwaltungClient.transaction(
+                    u.verwaltungId,
+                    stake,
+                    `Farkle New Round Cancelled Refund: ${this.gameState.gameName}`
+                )));
+        };
+        
+        // Filter users who accepted
+        let finalUsers = (this.gameState.users || []).filter(u => responses[u.id] === true);
+        
+        // Logic for minimum players: If it was multi-player, it should stay multi-player
+        if (initialUserCount > 1 && finalUsers.length < 2) {
+             ui.notifications.error(game.i18n.localize("FARKLE.insufficientPlayers"));
+             this._endFarkle();
+             return;
+        }
+
+        if (finalUsers.length === 0) {
+            ui.notifications.error(game.i18n.localize("FARKLE.noPlayersLeft"));
+            this._endFarkle();
+            return;
+        }
+
+        if (stake > 0 && finalUsers.length > 0) {
+            const results = await Promise.all(finalUsers.map(async (u) => {
+                if (!u.verwaltungId) return { user: u, success: false };
+                const coins = await VerwaltungClient.getCoins(u.verwaltungId);
+                if (coins < stake) return { user: u, success: false };
+                const tx = await VerwaltungClient.transaction(u.verwaltungId, -stake, `Farkle New Round: ${this.gameState.gameName}`);
+                return { user: u, success: tx };
+            }));
+            
+            const keptUsers = results.filter(r => r.success).map(r => r.user);
+            const removedNames = results.filter(r => !r.success).map(r => r.user.name);
+            
+            if (removedNames.length > 0) {
+                ui.notifications.warn(game.i18n.format("FARKLE.playersRemovedNoCoins", { names: removedNames.join(", ") }));
+            }
+            finalUsers = keptUsers;
+            newlyChargedUsers = keptUsers;
+        }
+
+        if (finalUsers.length === 0) {
+            await refundNewRoundCharges(newlyChargedUsers);
+            ui.notifications.error(game.i18n.localize("FARKLE.noPlayersLeft"));
+            this._endFarkle();
+            return;
+        }
+
+        if (initialUserCount > 1 && finalUsers.length < 2) {
+            await refundNewRoundCharges(newlyChargedUsers);
+            ui.notifications.error(game.i18n.localize("FARKLE.insufficientPlayers"));
+            this._endFarkle();
+            return;
+        }
+
+        // Reset scores and flags for everyone staying in
+        for (let user of finalUsers) {
+            user.score = 0;
+            user.hasFarkled = false;
+            user.wasLastPlace = false;
+        }
+
+        // Consolidated state update
+        this.gameState = {
+            targetScore: newTarget,
+            users: finalUsers,
+            winner: null,
+            userTurn: 0,
+            remainingRolls: 3,
+            rollLength: 6,
+            score: 0,
+            currentDice: [],
+            keptDice: [],
+            keepIndex: [],
+            isHotDice: false,
+            event: "start",
+            pendingResponses: null,
+            queryStartedAt: null,
+            nextTargetScore: null
+        };
+
+        ui.notifications.info(game.i18n.localize("FARKLE.roundReset"));
+    }
+
+    _getHeaderButtons() {
+        const buttons = super._getHeaderButtons();
+
+        buttons.unshift({
+            label: game.i18n.localize("FARKLE.help"),
+            class: "show-help",
+            icon: "fas fa-question",
+            onclick: () => this._showHelp()
+        });
+
+        // Entferne "Load Dice" Button aus dem Spielfenster
+        // (nur in der Lobby verfügbar)
+
+        return buttons;
+    }
+
+    _showHelp() {
+        new FarkleHelp().render(true);
+    }
+
+    // _loadDice wurde entfernt - nur in Lobby verfügbar
+
+    async _refundStakeIfCancelled(users) {
+        const stake = Number(this.gameState?.stake || 0);
+        const hasWinner = Boolean(this.gameState?.winner);
+        if (stake <= 0 || hasWinner || !Array.isArray(users) || users.length === 0) return;
+
+        const refundableUsers = users.filter(u => u?.verwaltungId);
+        if (!refundableUsers.length) return;
+
+        const results = await Promise.all(refundableUsers.map(async (user) => {
+            const success = await VerwaltungClient.transaction(
+                user.verwaltungId,
+                stake,
+                `Farkle Game Cancelled Refund: ${this.gameState?.gameName || "Farkle Game"}`
+            );
+            return { user, success };
+        }));
+
+        const refunded = results.filter(r => r.success).map(r => r.user.name);
+        const failed = results.filter(r => !r.success).map(r => r.user.name);
+        const whisperIds = users.map(u => u.id);
+
+        if (refunded.length) {
+            const lines = refunded.map(name =>
+                `<li>${game.i18n.format("FARKLE.stakeRefundLine", { name, amount: stake })}</li>`
+            ).join("");
+            ChatMessage.create({
+                content: `<p><b>${game.i18n.localize("FARKLE.stakeRefundTitle")}</b></p><ul>${lines}</ul>`,
+                whisper: whisperIds
+            });
+        }
+
+        if (failed.length) {
+            ui.notifications.warn(game.i18n.format("FARKLE.stakeRefundFailed", { names: failed.join(", ") }));
+        }
+    }
+
+    async _endFarkle() {
+        const users = Array.isArray(this.gameState?.users) ? this.gameState.users : [];
+        if (users.some(user => user.score)) {
+            const winner = users.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+            const winnerMessage = game.i18n.format("FARKLE.winner", { name: winner.name, score: winner.score });
+            const content = `<p>${winnerMessage}</p><p><ul>${users.map(x => `<li><b>${x.name}</b>: ${x.score}</li>`)}</ul></p>`
+
+            // Nur an Spieler in dieser Lobby whisper
+            const whisperIds = this.gameState.users.map(u => u.id);
+
+            const chatMessage = {
+                content,
+                whisper: whisperIds
+            };
+            ChatMessage.create(chatMessage);
+        }
+
+        await this._refundStakeIfCancelled(users);
+
+        this._gameState = duplicate(this._initialState);
+
+        // Sende Close-Signal an alle Clients
+        game.socket.emit(`module.${moduleName}`, {
+            type: 'close',
+            gameId: this.gameId,
+            payload: {
+                userId: game.user.id,
+                closeAll: true  // Signal dass alle Clients schließen sollen
+            },
+        });
+
+        // Entferne das Spiel aus der lokalen Liste
+        delete game.modules.get(moduleName).games[this.gameId];
+
+        // Benachrichtige Lobby über Spielende
+        game.socket.emit(`module.${moduleName}`, {
+            type: 'lobby-update',
+            gameId: this.gameId
+        });
+
+        this.close();
+    }
+
+    resetFarkle(users, gameName, targetScore, stake = 0) {
+        this._gameState = duplicate(this._initialState);
+        this._hasShownLoadedDiceDialog = false;
+
+        // Initialize achievement tracking for each user
+        const usersWithTracking = users.map(user => ({
+            ...user,
+            hasFarkled: false,     // Track if player farkled during this game (for Perfect Score)
+            wasLastPlace: false    // Track if player was ever in last place (for Comeback Kid)
+        }));
+
+        const state = {
+            users: usersWithTracking,
+            userTurn: 0,
+            event: "start",
+            gameName: gameName || "Farkle Game",
+            targetScore: Number.isFinite(targetScore) ? targetScore : 10000,
+            stake: stake,
+            createdBy: game.user.id,
+            createdAt: Date.now()
+        }
+
+        console.log("Farkle | resetFarkle called for gameId:", this.gameId, "state:", state);
+
+        this.gameState = state;
+
+        // Call hook for game start
+        Hooks.callAll("farkleGameStart", {
+            gameId: this.gameId,
+            gameName,
+            targetScore,
+            users: usersWithTracking
+        });
+
+        // Warte kurz bis gameState gesetzt ist, dann sende Update
+        setTimeout(() => {
+            console.log("Farkle | Sending lobby-update for gameId:", this.gameId);
+            game.socket.emit(`module.${moduleName}`, {
+                type: 'lobby-update',
+                gameId: this.gameId,
+                payload: {
+                    gameState: this._gameState
+                }
+            });
+        }, 100);
+    }
+
+    _resetRound() {
+        if (!this.gameState.users) return;
+
+        // Setze alle Punkte auf 0
+        for (let user of this.gameState.users) {
+            user.score = 0;
+        }
+
+        // Setze Spiel zurück aber behalte Spieler
+        this.gameState = {
+            userTurn: 0,
+            remainingRolls: 3,
+            rollLength: 6,
+            score: 0,
+            currentDice: [],
+            keptDice: [],
+            keepIndex: [],
+            isHotDice: false,
+        };
+
+        ui.notifications.info(game.i18n.localize("FARKLE.roundReset"));
+    }
+
+    _startFarkle() {
+        new PlayerPick(this.gameId).render(true);
+    }
+
+    get myTurn() {
+        return this.gameState.users[this.gameState.userTurn]?.id === game.user.id;
+    }
+
+    handleEvent(event) {
+        switch (event) {
+            case "start":
+                // Nur für User die im Spiel sind UND noch keinen Dialog gesehen haben
+                const isInGame = this.gameState.users?.some(u => u.id === game.user.id);
+                if (isInGame && !this._hasShownLoadedDiceDialog) {
+                    this._startEvent();
+                }
+                break;
+            case "winner":
+                this._winnerEvent();
+                break;
+            case "play-again-query":
+                this._showPlayAgainQuery();
+                break;
+            default:
+                break;
+        }
+    }
+
+    async _showPlayAgainQuery() {
+        // Der Creator hat bereits zugestimmt
+        if (this.gameState.createdBy === game.user.id) {
+            ui.notifications.info(game.i18n.localize("FARKLE.waitingForPlayers"));
+            return;
+        }
+
+        // Nur Spieler fragen, die aktuell im Spiel sind
+        const isParticipant = this.gameState.users?.some(u => u.id === game.user.id);
+        if (!isParticipant) return;
+
+        new DialogV2({
+            window: { title: game.i18n.localize("FARKLE.playAgain") },
+            content: `<p>${game.i18n.format("FARKLE.playAgainQuery", { stake: this.gameState.stake || 0 })}</p>`,
+            buttons: [{
+                action: "yes",
+                label: game.i18n.localize("Yes"),
+                icon: "fa-solid fa-check",
+                default: true,
+                callback: () => this._sendPlayAgainResponse(true)
+            }, {
+                action: "no",
+                label: game.i18n.localize("No"),
+                icon: "fa-solid fa-times",
+                callback: () => this._sendPlayAgainResponse(false)
+            }]
+        }).render({ force: true });
+    }
+
+    _sendPlayAgainResponse(accepted) {
+        game.socket.emit(`module.${moduleName}`, {
+            type: 'play-again-response',
+            gameId: this.gameId,
+            payload: {
+                userId: game.user.id,
+                accepted
+            }
+        });
+        
+        if (!accepted) {
+            this.close();
+        }
+    }
+
+    async showDiceSoNice(roll) {
+        if (game.modules.get('dice-so-nice')?.active && game.dice3d) {
+            // Nur an Spieler in dieser Lobby whisper
+            const whisperIds = this.gameState.users ? this.gameState.users.map(u => u.id) : [];
+
+            const promise = game.dice3d.showForRoll(roll, game.user, true, whisperIds, false);
+            if (!game.settings.get('dice-so-nice', 'immediatelyDisplayChatMessages')) await promise;
+        }
+    }
+
+    async _startEvent() {
+        // Markiere dass der Dialog bereits gezeigt wurde
+        this._hasShownLoadedDiceDialog = true;
+
+        const controlledActors = this.gameState.users.filter(user => user.id === game.user.id);
+        if (controlledActors.length === 0) return;
+
+        const actors = (await Promise.all(controlledActors.map(async (user) => {
+            return await fromUuid(user.character_id);
+        }))).filter(actor => {
+            return actor && actor.items.some(item => getProperty(item, 'flags.farkledice.loaded'));
+        });
+        if (!actors.length) return;
+
+        new PickLoadedDice(actors).render(true);
+    }
+
+    async _winnerEvent() {
+        // Only the creator sees the prompt
+        const isCreator = this.gameState.createdBy === game.user.id;
+        const winner = this.gameState.winner || {};
+        if (!isCreator) {
+            ui.notifications.info(game.i18n.format("FARKLE.winner", { name: winner.name || "-", score: winner.score || 0 }));
+            return;
+        }
+        new DialogV2({
+            window: { title: game.i18n.localize("FARKLE.playAgain") },
+            content: `
+            <p>${game.i18n.localize("FARKLE.winnerPromptNewRound")}</p>
+            <div class="form-group">
+                <label>${game.i18n.localize("FARKLE.newTargetScore")}:</label>
+                <input type="number" name="targetScore" value="${this.gameState.targetScore || 10000}" min="1000" step="100"/>
+            </div>
+        `,
+            buttons: [{
+                action: "yes",
+                label: game.i18n.localize("Yes"),
+                icon: "fa-solid fa-check",
+                default: true,
+                callback: async (_event, button) => {
+                    const form = button?.form;
+                    const nextTargetScore = parseInt(form?.targetScore?.value || this.gameState.targetScore || 10000, 10);
+                    
+                    const responses = {};
+                    responses[game.user.id] = true;
+                    
+                    this.gameState = { 
+                        event: "play-again-query", 
+                        pendingResponses: responses,
+                        queryStartedAt: Date.now(),
+                        nextTargetScore: nextTargetScore
+                    };
+
+                    // Initial timeout call (it will be picked up by the setter logic too)
+                    this._responseTimeout = setTimeout(() => {
+                        if (this.gameState.pendingResponses) {
+                            moduleDebug("Play-again response timeout reached. Finalizing with current responses.");
+                            this._finalizeNewRound();
+                        }
+                    }, 30000);
+
+                    // Falls der Ersteller der einzige aktive Spieler ist, sofort finalisieren
+                    const activeParticipants = (this.gameState.users || []).filter(u => game.users.get(u.id)?.active);
+                    if (activeParticipants.length <= 1) {
+                        if (this._responseTimeout) clearTimeout(this._responseTimeout);
+                        this._finalizeNewRound();
+                    }
+                }
+            }, {
+                action: "no",
+                label: game.i18n.localize("No"),
+                icon: "fa-solid fa-times",
+                callback: () => this._endFarkle()
+            }]
+        }).render({ force: true });
+    }
+
+
+    _keepDie(event) {
+        if (!this.myTurn) return;
+
+        const target = event.currentTarget;
+        const isAdded = !target.classList.contains("kept");
+        const keptDice = this.gameState.keptDice;
+        const dieIndex = parseInt(target.dataset.index);
+
+        if (isAdded) {
+            keptDice.push(dieIndex);
+            // Play keep sound
+            soundEffects.playKeep();
+        } else {
+            const index = keptDice.indexOf(dieIndex);
+            if (index > -1) {
+                keptDice.splice(index, 1);
+            }
+        }
+
+        const newState = {
+            keptDice
+        }
+
+        if (keptDice.length === this.gameState.currentDice.length) {
+            const isHotDice = this.isHotDice(this.gameState.currentDice)
+
+            if (isHotDice) {
+                newState.remainingRolls = 3;
+                newState.rollLength = 6;
+                newState.score = this.gameState.score + isHotDice;
+                newState.keptDice = [];
+                newState.currentDice = [];
+                newState.keepIndex = [];
+                newState.isHotDice = true;
+
+                // Play hot dice sound
+                soundEffects.playHotDice();
+
+                // Track Hot Dice achievement
+                const currentUser = this.gameState.users[this.gameState.userTurn];
+                if (currentUser) {
+                    achievementManager.trackHotDice(currentUser.id);
+
+                    // Call hook for hot dice
+                    Hooks.callAll("farkleHotDice", {
+                        gameId: this.gameId,
+                        user: currentUser,
+                        score: isHotDice
+                    });
+                }
+
+                ui.notifications.warn(game.i18n.localize("FARKLE.diceAreBurning"));
+            }
+        }
+
+        this.gameState = newState
+    }
+
+    async roll(rollLength, user) {
+        const cid = user && user.character_id;
+        const loadedDice = (this.cheats && cid) ? this.cheats[cid] : null;
+        let roll;
+
+        if (!loadedDice) {
+            // Keine gezinkten Würfel - normaler Wurf
+            roll = await new Roll(`${rollLength}d6`).evaluate()
+        } else {
+            // Gezinkte Würfel vorhanden - erstelle einzelne Würfel
+            const diceFormulas = [];
+            for (let i = 0; i < rollLength; i++) {
+                diceFormulas.push('1d6');
+            }
+            roll = await new Roll(diceFormulas.join(' + ')).evaluate();
+        }
+
+        const finalResults = [];
+        let dieIndex = 0;
+
+        for (let term of roll.terms) {
+            const isDie = term instanceof foundry.dice.terms.Die;
+            if (isDie) {
+                for (let die of term.results) {
+                    let result = die.result;
+
+                    // Wenn gezinkte Würfel vorhanden sind, wende die Gewichtung an
+                    if (Array.isArray(loadedDice) && loadedDice[dieIndex]) {
+                        const weights = loadedDice[dieIndex];
+                        let mappedRoll = 1;
+                        let cumulative = 0;
+
+                        // Berechne welche Seite basierend auf der Gewichtung getroffen wurde
+                        for (let face = 0; face < weights.length; face++) {
+                            cumulative += weights[face];
+                            if (result <= cumulative) {
+                                mappedRoll = face + 1;
+                                break;
+                            }
+                        }
+
+                        result = mappedRoll;
+                        die.result = result;
+                    }
+
+                    die.faces = 6;
+                    finalResults.push({
+                        result: result,
+                        loaded: !!(loadedDice && loadedDice[dieIndex])
+                    });
+
+                    dieIndex++;
+                }
+            }
+        }
+
+        this.showDiceSoNice(roll);
+        return finalResults;
+    }
+
+    async _rollDice() {
+        if (this.gameState.keptDice.length === 0 && this.gameState.currentDice.length !== 0) {
+            ui.notifications.warn(game.i18n.localize("FARKLE.noDiceKept"));
+            return;
+        }
+
+        const calculatedScore = this.score();
+        const newRollLength = this.gameState.rollLength - calculatedScore.usedIndexes.length;
+
+        const currentPlayer = this.gameState.users[this.gameState.userTurn];
+
+        // Track single die rolls for "No Fear" achievement
+        if (newRollLength === 1) {
+            achievementManager.incrementStat(currentPlayer.id, 'singleDieRolls');
+        }
+
+        // Show rolling animation if enabled
+        const rollAnimationsEnabled = game.settings.get(moduleName, "rollAnimations");
+        if (rollAnimationsEnabled) {
+            this.gameState = {
+                ...this.gameState,
+                isRolling: true,
+                currentDice: Array(newRollLength).fill('?')
+            };
+            this.render();
+
+            // Play roll sound
+            soundEffects.playRoll();
+
+            // Wait for animation (600ms as defined in CSS)
+            await new Promise(resolve => setTimeout(resolve, 600));
+        } else {
+            // Play roll sound even without animation
+            soundEffects.playRoll();
+        }
+
+        const roll = await this.roll(newRollLength, currentPlayer);
+        const data = {
+            rolls: roll,
+            msg: game.i18n.format('FARKLE.rolling', { name: currentPlayer.name, count: newRollLength })
+        }
+
+        const content = await foundry.applications.handlebars.renderTemplate("modules/farkledice/templates/rollMessage.hbs", data);
+
+        // Nur an Spieler in dieser Lobby whisper
+        const whisperIds = this.gameState.users.map(u => u.id);
+
+        await ChatMessage.create({
+            content,
+            sound: CONFIG.sounds.dice,
+            whisper: whisperIds
+        });
+        const newState = {
+            currentDice: roll.map(die => die.result),
+            rollLength: newRollLength,
+            keptDice: [],
+            keepIndex: this.gameState.keepIndex.concat(calculatedScore.usedIndexes),
+            score: this.gameState.score + calculatedScore.score,
+            isRolling: false  // Reset rolling animation
+        }
+
+        const isFarkle = this.isFarkle(newState.currentDice);
+        if (isFarkle) {
+            newState.score = 0;
+            newState.remainingRolls = 0; // Prevent further rolling after farkle
+
+            // Play farkle sound
+            soundEffects.playFarkle();
+
+            // Track farkle for achievements
+            const currentUser = this.gameState.users[this.gameState.userTurn];
+            if (currentUser) {
+                // Mark that this player farkled during this game (for Perfect Score tracking)
+                currentUser.hasFarkled = true;
+
+                // Get current stats to check if this is consecutive
+                const stats = achievementManager.getPlayerStats(currentUser.id);
+                const wasLastFarkle = stats.consecutiveFarkles > 0;
+                achievementManager.trackFarkle(currentUser.id, wasLastFarkle);
+
+                // Call hook for farkle
+                Hooks.callAll("farkleFarkle", {
+                    gameId: this.gameId,
+                    user: currentUser,
+                    dice: newState.currentDice
+                });
+            }
+        }
+
+        // Call hook for dice roll
+        Hooks.callAll("farkleDiceRolled", {
+            gameId: this.gameId,
+            user: this.gameState.users[this.gameState.userTurn],
+            dice: newState.currentDice,
+            isFarkle
+        });
+
+        this.gameState = newState;
+    }
+
+    selectedDice() {
+        const indexes = this.gameState.keptDice;
+        const dice = this.gameState.currentDice || [];
+        return dice.filter((_die, index) => indexes.includes(index));
+    }
+
+    _endTurn() {
+        if (this.gameState.winner) return;
+
+        let nextUser = this.gameState.userTurn + 1;
+        if (nextUser >= this.gameState.users.length) {
+            nextUser = 0;
+        }
+        const roundScore = this.score().score + this.gameState.score;
+        const user = this.gameState.users[this.gameState.userTurn]
+        user.score += roundScore;
+
+        // Track turn score for achievements
+        achievementManager.trackTurnScore(user.id, roundScore);
+
+        // Reset consecutive farkles if player scored points
+        if (roundScore > 0) {
+            const stats = achievementManager.getPlayerStats(user.id);
+            if (stats.consecutiveFarkles > 0) {
+                stats.consecutiveFarkles = 0;
+                achievementManager.updateStats(user.id, stats);
+            }
+        }
+
+        // Check if any player is in last place (for Comeback Kid tracking)
+        if (this.gameState.users.length > 1) {
+            const sortedUsers = [...this.gameState.users].sort((a, b) => a.score - b.score);
+            const lastPlaceScore = sortedUsers[0].score;
+            this.gameState.users.forEach(player => {
+                if (player.score === lastPlaceScore && player.score < sortedUsers[sortedUsers.length - 1].score) {
+                    player.wasLastPlace = true;
+                }
+            });
+        }
+
+        const target = this.gameState.targetScore || 10000;
+        if (user.score >= target) {
+            const winnerMessage = game.i18n.format("FARKLE.winner", { name: user.name, score: user.score });
+
+            // Play winner sound
+            soundEffects.playWinner();
+
+            // Nur an Spieler in dieser Lobby whisper
+            const whisperIds = this.gameState.users.map(u => u.id);
+
+            ChatMessage.create({
+                content: `<p>${winnerMessage}</p>`,
+                whisper: whisperIds
+            });
+
+            // Track game end for all players
+            this.gameState.users.forEach(player => {
+                const won = player.id === user.id;
+                achievementManager.trackGameEnd(player.id, won, player.score);
+            });
+
+            // Handle Pot Winnings
+            const stake = this.gameState.stake || 0;
+            if (stake > 0 && user.verwaltungId) {
+                const playerCount = this.gameState.users.length;
+                const pot = stake * playerCount;
+                VerwaltungClient.transaction(user.verwaltungId, pot, `Farkle Game Win: ${this.gameState.gameName}`).then(success => {
+                    if (success) {
+                        ChatMessage.create({
+                            content: `<p>${game.i18n.format("FARKLE.wonPot", { name: user.name, amount: pot })}</p>`,
+                            whisper: whisperIds
+                        });
+                    } else {
+                        ui.notifications.error(`Failed to transfer pot to winner ${user.name}`);
+                    }
+                });
+            }
+
+            // Check for special achievements for the winner
+            // Perfect Score: Won without farkling
+            if (!user.hasFarkled) {
+                const stats = achievementManager.getPlayerStats(user.id);
+                stats.perfectGames = (stats.perfectGames || 0) + 1;
+                achievementManager.updateStats(user.id, stats);
+            }
+
+            // Comeback Kid: Won after being in last place
+            if (user.wasLastPlace) {
+                const stats = achievementManager.getPlayerStats(user.id);
+                stats.comebacks = (stats.comebacks || 0) + 1;
+                achievementManager.updateStats(user.id, stats);
+            }
+
+            this.gameState = { event: "winner", winner: { name: user.name, score: user.score, target } };
+
+            // Call hook for game end
+            Hooks.callAll("farkleGameEnd", {
+                gameId: this.gameId,
+                winner: user,
+                allPlayers: this.gameState.users,
+                targetScore: target
+            });
+
+            return;
+        }
+
+        // Play end turn sound
+        soundEffects.playEndTurn();
+
+        this.gameState = {
+            userTurn: nextUser,
+            remainingRolls: 3,
+            rollLength: 6,
+            score: 0,
+            currentDice: [],
+            keptDice: [],
+            keepIndex: [],
+            isHotDice: false,
+        }
+    }
+
+    isHotDice(throws) {
+        if (throws.length === 0) return false;
+
+        const selectedIndexes = throws.map((die, index) => index);
+        const score = this.scoreCalc(selectedIndexes, throws);
+        if (score.usedIndexes.length === throws.length && score.score > 0) return score.score;
+
+        return false;
+    }
+
+    isFarkle(throws) {
+        const dice = throws ?? this.gameState.currentDice ?? [];
+        if (dice.length === 0) return false;
+
+        const selectedIndexes = dice.map((die, index) => index);
+        return this.scoreCalc(selectedIndexes, dice).score === 0;
+    }
+
+    async _prepareContext(options) {
+        const context = {};
+        const currentScore = this.score()
+        context.started = isEmpty(this.gameState) === false;
+        context.gameState = this.gameState;
+        context.targetScore = this.gameState?.targetScore || 10000;
+        context.isGm = game.user.isGM;
+        context.isCreator = this.gameState.createdBy === game.user.id;
+        context.isSpectator = this.isSpectator;
+        context.canManageGame = context.isGm || context.isCreator;
+        if (context.started) {
+            context.currentPlayer = this.gameState.users[this.gameState.userTurn];
+            context.currentUser = game.users.get(context.currentPlayer?.id);
+            context.currentTurnPoints = currentScore.score + this.gameState.score;
+            const character = context.currentPlayer?.character_id ? await fromUuid(context.currentPlayer.character_id) : context.currentUser?.character;
+            context.currentUserURL = character?.img || context.currentUser?.avatar;
+            context.allowedToRoll = this.gameState.remainingRolls > 0 && !this.isSpectator;
+            context.myTurn = this.myTurn && !this.isSpectator;
+        }
+        context.playerCards = await Promise.all((this.gameState.users || []).map(async (player, index) => {
+            const actor = player?.character_id ? await fromUuid(player.character_id) : null;
+            const user = game.users.get(player?.id);
+            const score = Number(player?.score || 0);
+            const target = Math.max(1, Number(context.targetScore || 10000));
+            return {
+                name: player?.name || "-",
+                score,
+                target,
+                percent: Math.min(100, Math.round((score / target) * 100)),
+                image: actor?.img || user?.avatar || "icons/svg/mystery-man.svg",
+                active: index === this.gameState.userTurn
+            };
+        }));
+        context.isFarkle = this.isFarkle();
+        if (this.gameState.currentDice?.length) {
+            context.currentDice = this.gameState.currentDice?.map((die, index) => {
+                const isKept = this.gameState.keptDice.includes(index);
+                const invalid = !currentScore.usedIndexes.includes(index);
+                const cssClass = []
+                if (isKept) {
+                    cssClass.push('kept');
+                }
+                if (invalid) {
+                    cssClass.push('invalid');
+                }
+                // Add burning class for hot dice
+                if (this.gameState.isHotDice) {
+                    cssClass.push('burning');
+                }
+                // Add rolling class during animation
+                if (this.gameState.isRolling) {
+                    cssClass.push('rolling');
+                }
+                return {
+                    die,
+                    cssClass: cssClass.join(' '),
+                }
+            })
+        } else {
+            context.currentDice = ['?', '?', '?', '?', '?', '?'].map((die, index) => {
+                return {
+                    die,
+                    cssClass: 'waiting'
+                }
+            })
+        }
+        return context;
+    }
+
+    score() {
+        const indexes = this.gameState.keptDice;
+        const dice = this.gameState.currentDice || [];
+        return this.scoreCalc(indexes, dice);
+    }
+
+    scoreCalc(selectedIndexes, dice) {
+        if (!Array.isArray(dice) || dice.length === 0 || !selectedIndexes.length)
+            return { score: 0, usedIndexes: [] };
+
+        const selectedDice = selectedIndexes.map(index => ({
+            value: dice[index],
+            index
+        })).filter(d => d.value >= 1 && d.value <= 6);
+
+        if (selectedDice.length === 0) return { score: 0, usedIndexes: [] };
+
+        const counts = Array(7).fill(0);
+        for (let die of selectedDice) {
+            counts[die.value]++;
+        }
+
+        let score = 0;
+        let usedIndexes = [];
+
+        if (selectedDice.length === 6 && counts.slice(1).every(count => count === 1)) {
+            return { score: 1500, usedIndexes: selectedDice.map(d => d.index) };
+        }
+
+        if (selectedDice.length === 6 && counts.filter(count => count === 2).length === 3) {
+            return { score: 1500, usedIndexes: selectedDice.map(d => d.index) };
+        }
+
+        if (selectedDice.length === 6 && counts.filter(count => count === 3).length === 2) {
+            return { score: 2500, usedIndexes: selectedDice.map(d => d.index) };
+        }
+
+        if (selectedDice.length === 6 && counts.includes(4) && counts.includes(2)) {
+            return { score: 1500, usedIndexes: selectedDice.map(d => d.index) };
+        }
+
+        for (let i = 1; i <= 6; i++) {
+            if (counts[i] >= 3) {
+                let baseScore = i === 1 ? 1000 : i * 100;
+                switch (counts[i]) {
+                    case 6: score += baseScore * 4; break;
+                    case 5: score += baseScore * 3; break;
+                    case 4: score += baseScore * 2; break;
+                    case 3: score += baseScore; break;
+                }
+
+                const diceOfThisValue = selectedDice.filter(d => d.value === i);
+                usedIndexes = usedIndexes.concat(diceOfThisValue.slice(0, counts[i]).map(d => d.index));
+
+                counts[i] = 0;
+            }
+        }
+
+        for (let i of [1, 5]) {
+            if (counts[i] > 0) {
+                score += (i === 1 ? 100 : 50) * counts[i];
+
+                const diceOfThisValue = selectedDice
+                    .filter(d => d.value === i && !usedIndexes.includes(d.index));
+                usedIndexes = usedIndexes.concat(diceOfThisValue.slice(0, counts[i]).map(d => d.index));
+            }
+        }
+
+        return { score, usedIndexes };
+    }
+
+    _onClickAction(event, target) {
+        if (this.isSpectator) {
+            const allowedSpectatorActions = ["showHelp"];
+            const action = target.dataset.action;
+            if (!allowedSpectatorActions.includes(action)) return;
+        }
+        
+        const action = target.dataset.action;
+        switch (action) {
+            case "rollDice":
+                event.preventDefault();
+                moduleDebug("Roll dice action", { gameId: this.gameId });
+                this._rollDice();
+                return;
+            case "endTurn":
+                event.preventDefault();
+                moduleDebug("End turn action", { gameId: this.gameId });
+                this._endTurn();
+                return;
+            case "keepDie":
+                event.preventDefault();
+                this._keepDie({ currentTarget: target });
+                return;
+            case "endFarkle":
+                event.preventDefault();
+                this._endFarkle();
+                return;
+            case "startFarkle":
+                event.preventDefault();
+                this._startFarkle();
+                return;
+            case "resetRound":
+                event.preventDefault();
+                this._resetRound();
+                return;
+            default:
+                return super._onClickAction(event, target);
+        }
+    }
+}

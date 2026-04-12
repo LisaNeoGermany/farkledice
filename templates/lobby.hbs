@@ -1,0 +1,69 @@
+<div class="farkle-scrollable">
+    <!-- Lobby Header -->
+    <div class="farkle-lobby-header">
+        <div class="farkle-flexrow">
+            <div class="farkle-flex1">
+                <h2>{{localize 'FARKLE.lobbyTitle'}}</h2>
+                <p>{{localize 'FARKLE.lobbyDescription'}}</p>
+            </div>
+            <div class="farkle-flex0" style="display: flex; gap: 8px;">
+                <button type="button" class="icon" data-action="showHelp" data-tooltip="FARKLE.help" style="background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3);">
+                    <i class="fas fa-question-circle"></i>
+                </button>
+                <button type="button" class="icon" data-action="showAchievements" data-tooltip="Achievements ansehen" style="background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3);">
+                    <i class="fas fa-medal"></i>
+                </button>
+                <button type="button" class="icon" data-action="showStats" data-tooltip="Statistiken ansehen" style="background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3);">
+                    <i class="fas fa-chart-bar"></i>
+                </button>
+                <button type="button" class="icon" data-action="refresh" data-tooltip="FARKLE.refresh" style="background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3);">
+                    <i class="fas fa-sync"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Game Button -->
+    <div style="margin-bottom: 24px;">
+        <button type="button" class="primary" data-action="createGame" style="width: 100%; padding: 12px; font-size: 1.1rem;">
+            <i class="fas fa-plus-circle"></i> {{localize 'FARKLE.createNewGame'}}
+        </button>
+    </div>
+
+    <!-- Active Games -->
+    {{#if hasGames}}
+    <h3 style="margin-bottom: 16px;">
+        <i class="fas fa-gamepad"></i> {{localize 'FARKLE.activeGames'}}
+    </h3>
+    <div class="farkle-lobby-grid">
+        {{#each games as |game|}}
+        <div class="farkle-game-card">
+            <div>
+                <div class="farkle-game-card-title" title="{{game.name}}">
+                    <i class="fas fa-dice"></i> {{game.name}}
+                </div>
+                <div class="farkle-game-card-meta">
+                    <span><i class="fas fa-user"></i> {{game.creator}}</span>
+                    <span><i class="fas fa-users"></i> {{game.playerCount}} {{localize 'FARKLE.players'}}</span>
+                    <span><i class="fas fa-play-circle"></i> {{game.currentPlayer}}</span>
+                    {{#if game.stake}}
+                    <span><i class="fas fa-coins"></i> {{localize 'FARKLE.stake'}}: {{game.stake}}</span>
+                    {{/if}}
+                </div>
+            </div>
+            
+            <button type="button" class="success" data-action="joinGame" data-gameid="{{game.id}}" style="width: 100%; margin-top: 8px;">
+                <i class="fas fa-sign-in-alt"></i> {{localize 'FARKLE.join'}}
+            </button>
+        </div>
+        {{/each}}
+    </div>
+    {{else}}
+    <!-- Empty State -->
+    <div class="farkle-empty-state">
+        <i class="fas fa-dice fa-3x"></i>
+        <p style="font-size: 1.1rem; margin: 16px 0 8px;">{{localize 'FARKLE.noActiveGames'}}</p>
+        <p style="font-size: 0.9rem; color: var(--color-text-dark-secondary);">{{localize 'FARKLE.createFirstGame'}}</p>
+    </div>
+    {{/if}}
+</div>

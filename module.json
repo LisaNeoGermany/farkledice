@@ -1,0 +1,56 @@
+{
+  "title": "Farkle - A Dice Game",
+  "description": "Bring a touch of medieval mischief to your game night with Farkle, the classic game of luck and risk—now as a quick-play module! Known from Kingdom Come: Deliverance, this ancient pastime is perfect for passing time in a tavern, settling scores over ale, or keeping your group entertained while someone's AFK. Easy to learn, fast to play, and endlessly addictive—roll the dice, press your luck, and don't farkle out! Ideal for Foundry VTT side sessions, tavern downtime, or in-game gambling scenes.",
+  "version": "1.1.0-v13",
+  "url": "https://github.com/Cibola8/farkledice",
+  "manifest": "https://raw.githubusercontent.com/Cibola8/farkledice/master/module.json",
+  "download": "https://github.com/Cibola8/farkle/releases/download/1.0.4/farkledice-1.0.4.zip",
+  "languages": [
+    {
+      "lang": "de",
+      "name": "Deutsch",
+      "path": "lang/de.json"
+    },
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "esmodules": [
+    "modules/utils.js",
+    "modules/FarkleApplication.js",
+    "modules/FarkleHelp.js",
+    "modules/FarkleStart.js",
+    "modules/DiceLoader.js",
+    "modules/PickLoadedDice.js",
+    "modules/PlayerPick.js",
+    "modules/PlayerPickJoin.js",
+    "modules/FarkleLobby.js",
+    "modules/FarkleScorer.js",
+    "modules/init.js"
+  ],
+  "id": "farkledice",
+  "authors": [
+    {
+      "name": "Cibola8"
+    }
+  ],
+  "styles": [
+    "styles/css/farkle.css"
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "packs": [
+    {
+      "name": "macros",
+      "label": "Farkle Macros",
+      "path": "packs/macros",
+      "type": "Macro",
+      "system": "none"
+    }
+  ],
+  "socket": true
+}

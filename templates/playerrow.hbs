@@ -1,0 +1,42 @@
+<div class="player-root">
+    <div class="player farkle-flexrow" data-characteruuid="{{player.character_id}}">
+        <img src="{{player.avatar}}" class="userAvatar farkle-flex0" style="height:60px;width:60px;object-fit:contain"/>
+        <div style="padding: 0 10px; display: flex; align-items: center;">
+            <strong>{{player.name}}</strong>
+        </div>
+        <select class="characterSelect">
+            <option value="">{{localize 'FARKLE.selectCharacter'}}</option>
+            {{#each player.characters as |char|}}
+                <option
+                    value="{{char.uuid}}"
+                    data-character-name="{{char.name}}"
+                    {{#if char.disabled}}disabled{{/if}}
+                    {{#if (eq char.uuid ../player.character_id)}}selected{{/if}}
+                >{{char.label}}</option>
+            {{else}}
+                <option value="" disabled>{{localize 'FARKLE.noCharactersFound'}}</option>
+            {{/each}}
+        </select>
+        <input type="checkbox" class="selectPlayer farkle-flex0" checked style="display:none"/>
+        <input type="hidden" class="representedBy" value="{{player.id}}"/>
+    </div>
+
+    <div class="loaded-dice-container" style="margin-top: 5px; padding-left: 70px;">
+        {{#each player.characters as |char|}}
+            <div class="dice-list" data-for-character="{{char.uuid}}" style="display: none;">
+                {{#if char.loadedDice.length}}
+                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">{{localize 'FARKLE.pickLoadedDice'}}:</label>
+                    <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                        {{#each char.loadedDice as |die|}}
+                            <div class="farkle-flex0 pickableDie" data-tooltip="{{die.name}}" data-action="toggleDie" data-die="{{die.uuid}}">
+                                <img src="{{die.img}}" style="height:40px;min-width:40px;object-fit:contain"/>
+                            </div>
+                        {{/each}}
+                    </div>
+                {{else}}
+                     <p style="font-style: italic; color: #888;">{{localize 'FARKLE.noLoadedDice'}}</p>
+                {{/if}}
+            </div>
+        {{/each}}
+    </div>
+</div>

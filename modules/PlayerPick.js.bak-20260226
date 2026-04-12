@@ -1,0 +1,401 @@
+import { FarkleApplication } from "./FarkleApplication.js";
+import { moduleDebug, moduleName, resolveRootElement } from "./utils.js";
+import VerwaltungClient from "./VerwaltungClient.js";
+
+export default class PlayerPick extends FarkleApplication {
+    constructor(gameId, gameName, targetScore, stake = 0, options = {}) {
+        super(options);
+        this.gameId = gameId;
+        this.gameName = gameName;
+        this.targetScore = Number.isFinite(targetScore) ? targetScore : undefined;
+        this.stake = stake;
+    }
+    static DEFAULT_OPTIONS = {
+        id: "farkle-player-pick-{id}",
+        classes: ["farkle-scorer"],
+        window: {
+            title: "Farkle",
+            contentClasses: ["standard-form"]
+        },
+        position: {
+            width: 500
+        }
+    };
+
+    static PARTS = {
+        body: {
+            root: true,
+            template: "modules/farkledice/templates/playerpick.hbs"
+        }
+    };
+
+    get title() {
+        return game.i18n.localize("FARKLE.playerPick");
+    }
+
+    _cancelSelection() {
+        this.close();
+    }
+
+    get availablePlayers() {
+        // Jeder Spieler sieht nur sich selbst zur Charakterauswahl
+        const user = game.user;
+        return [{
+            id: user.id,
+            name: user.name,
+            characterName: user.character?.name || user.name,
+            avatar: user.avatar || user.character?.img,
+            character_id: user.character?.uuid,
+        }];
+    }
+
+    get availableCharacters() {
+        // Hole alle Akteure die der aktuelle User besitzt oder sehen kann
+        return game.actors.filter(actor => {
+            return actor.type === 'character' || actor.isOwner;
+        }).map(actor => ({
+            uuid: actor.uuid,
+            name: actor.name,
+            img: actor.img
+        }));
+    }
+
+    getCharactersForUser(userId) {
+        // Hole alle Charaktere die ein bestimmter User besitzt
+        const user = game.users.get(userId);
+        if (!user) return [];
+        
+        moduleDebug(`Getting characters for user ${user.name} (isGM: ${user.isGM})`);
+        moduleDebug(`Total actors in game: ${game.actors.size}`);
+
+        const getDice = (actor) => {
+            return actor.items.filter(item => foundry.utils.getProperty(item, 'flags.farkledice.loaded')).map(item => ({
+                id: item.id,
+                uuid: item.uuid,
+                name: item.name,
+                img: item.img
+            }));
+        };
+
+        // GMs können alle Charaktere sehen
+        if (user.isGM) {
+            const characterActors = game.actors.filter(actor => actor.type === 'character');
+            moduleDebug(`Found ${characterActors.length} character actors for GM.`);
+            const list = characterActors.map(actor => ({
+                uuid: actor.uuid,
+                name: actor.name,
+                img: actor.img,
+                loadedDice: getDice(actor)
+            }));
+            moduleDebug("PlayerPick characters for GM", {userId, count: list.length, names: list.map(l => l.name)});
+            return list;
+        }
+        
+        // Normale Spieler sehen nur ihre eigenen Charaktere
+        const list = game.actors.filter(actor => {
+            const ownership = actor.ownership || {};
+            return (actor.type === 'character') && (ownership[userId] >= 3 || ownership[userId] === CONST.DOCUMENT_OWNERSHIP_LEVELS?.OWNER);
+        }).map(actor => ({
+            uuid: actor.uuid,
+            name: actor.name,
+            img: actor.img,
+            loadedDice: getDice(actor)
+        }));
+        moduleDebug("PlayerPick characters for user", {userId, count: list.length, names: list.map(l => l.name)});
+        return list;
+    }
+
+    async _prepareContext(options) {
+        const context = {};
+        const stake = Number(this.stake || 0);
+        console.log("Farkle | PlayerPick _prepareContext called");
+
+        context.stake = stake;
+        
+        // Fetch all verwaltung characters once to populate cache and speed up lookups
+        await VerwaltungClient.getCharacters();
+
+        context.players = await Promise.all(this.availablePlayers.map(async p => {
+            const characters = this.getCharactersForUser(p.id) ?? [];
+            console.log(`Farkle | Player ${p.name} (${p.id}) has ${characters.length} characters:`, characters.map(c => c.name));
+
+            // Fetch coins for each character
+            for (const char of characters) {
+                if (stake > 0) {
+                    const verwaltungChar = await VerwaltungClient.findCharacter(char.name);
+                    if (verwaltungChar) {
+                        char.verwaltungId = verwaltungChar.id;
+                        // Use coins from character object if present, otherwise fetch explicitly
+                        if (typeof verwaltungChar.coins !== 'undefined') {
+                            char.coins = verwaltungChar.coins;
+                        } else {
+                            char.coins = await VerwaltungClient.getCoins(verwaltungChar.id);
+                        }
+                    } else {
+                        char.coins = 0;
+                        char.verwaltungId = null;
+                    }
+                    
+                    char.canAfford = char.coins >= stake;
+                    char.disabled = !char.canAfford;
+                    char.label = `${char.name} (${char.coins} ${game.i18n.localize("FARKLE.coins")})`;
+                } else {
+                    char.coins = null;
+                    char.verwaltungId = null;
+                    char.canAfford = true;
+                    char.disabled = false;
+                    char.label = char.name;
+                }
+            }
+
+            const preferredCharacter = p.character_id || characters[0]?.uuid || "";
+            const preferred = characters.find(c => c.uuid === preferredCharacter);
+            const selectedCharacter = preferred && !preferred.disabled
+                ? preferred.uuid
+                : (characters.find(c => !c.disabled)?.uuid || "");
+            const selected = characters.find(c => c.uuid === selectedCharacter);
+            const avatar = selected?.img || p.avatar;
+            const characterName = selected?.name || p.characterName;
+
+            const playerData = {
+                id: p.id,
+                name: p.name,
+                characterName,
+                avatar,
+                character_id: selectedCharacter,
+                characters
+            };
+
+            return playerData;
+        }));
+
+        console.log("Farkle | PlayerPick final context prepared");
+        return context;
+    }
+
+    async _addPlayer() {
+        return;
+    }
+
+    async _addRow(player) {
+        return;
+    }
+
+    _activateCharacterChangeListeners() {
+        const root = resolveRootElement(null, this.element);
+        if (!root) {
+            moduleDebug("PlayerPick char listeners missing root");
+            return;
+        }
+        const selects = root.querySelectorAll('.characterSelect');
+        moduleDebug("PlayerPick character selects", {
+            count: selects.length,
+            options: Array.from(selects).map(sel => sel.options.length)
+        });
+        
+        const updateDiceVisibility = (playerRow, characterUuid) => {
+            const diceContainer = playerRow.querySelector('.loaded-dice-container');
+            if (!diceContainer) return;
+            
+            const lists = diceContainer.querySelectorAll('.dice-list');
+            lists.forEach(list => {
+                if (list.dataset.forCharacter === characterUuid) {
+                    list.style.display = 'block';
+                } else {
+                    list.style.display = 'none';
+                }
+            });
+        };
+
+        selects.forEach(select => {
+            select.addEventListener('change', async (event) => {
+                const target = event.currentTarget;
+                const characterUuid = target.value;
+                const playerRow = target.closest('.player-root');
+                if (!playerRow) return;
+                
+                const avatar = playerRow.querySelector('.userAvatar');
+                if (characterUuid) {
+                    const character = await fromUuid(characterUuid);
+                    if (character && avatar) {
+                        avatar.src = character.img;
+                        const innerRow = playerRow.querySelector('.player');
+                        if (innerRow) innerRow.dataset.characteruuid = characterUuid;
+                    }
+                } else if (avatar) {
+                    const user = game.user;
+                    if (user) {
+                        avatar.src = user.avatar || user.character?.img || 'icons/svg/mystery-man.svg';
+                    }
+                    const innerRow = playerRow.querySelector('.player');
+                    if (innerRow) delete innerRow.dataset.characteruuid;
+                }
+                
+                updateDiceVisibility(playerRow, characterUuid);
+            });
+            
+            // Initialize visibility
+            const playerRow = select.closest('.player-root');
+            if (playerRow) {
+                updateDiceVisibility(playerRow, select.value);
+            }
+        });
+    }
+
+    activateListeners(html) {
+        super.activateListeners(html);
+        this._activateCharacterChangeListeners();
+    }
+
+    _toggleDie(event, target) {
+        target.classList.toggle('picked');
+    }
+
+    _onClickAction(event, target) {
+        const action = target.dataset.action;
+        switch (action) {
+            case "confirmSelection":
+                event.preventDefault();
+                this._confirmSelection();
+                return;
+            case "cancelSelection":
+                event.preventDefault();
+                this._cancelSelection();
+                return;
+            case "toggleDie":
+                event.preventDefault();
+                this._toggleDie(event, target);
+                return;
+            default:
+                return super._onClickAction(event, target);
+        }
+    }
+
+    async _confirmSelection() {
+        const root = resolveRootElement(null, this.element);
+        if (!root) {
+            moduleDebug("PlayerPick confirm missing root");
+            return;
+        }
+        const userDivs = root.querySelectorAll('.player'); // These are inside .player-root
+        const users = []
+        const cheats = {};
+        
+        console.log("Farkle | Confirming selection, found", userDivs.length, "player rows");
+        
+        for (let i = 0; i < userDivs.length; i++) {
+            const player = userDivs[i];
+            const playerRoot = player.closest('.player-root');
+            
+            const selectedCheckbox = player.querySelector('.selectPlayer');
+            
+            if (!selectedCheckbox) continue;
+
+            const playerIdInput = player.querySelector('.representedBy');
+            const characterSelect = player.querySelector('.characterSelect');
+            
+            if (!playerIdInput || !characterSelect) {
+                ui.notifications.error("Fehler: Dropdown-Felder nicht gefunden!");
+                continue;
+            }
+            
+            const playerId = playerIdInput.value;
+            const characterUuid = characterSelect.value;
+
+            // Sicherheitscheck: Nur eigene Charakterauswahl erlauben
+            if (playerId !== game.user.id) {
+                continue;
+            }
+
+            if (!characterUuid || characterUuid === "") {
+                ui.notifications.warn(game.i18n.localize("FARKLE.noCharacterSelected"));
+                continue;
+            }
+            
+            const selectedOption = characterSelect.options[characterSelect.selectedIndex];
+            const characterName = selectedOption?.dataset?.characterName || selectedOption?.text || "";
+            let verwaltungId = null;
+
+            // Check for stake and deduct coins
+            if (this.stake > 0) {
+                const verwaltungChar = await VerwaltungClient.findCharacter(characterName);
+                if (!verwaltungChar) {
+                    ui.notifications.error(`Character "${characterName}" not found in Verwaltung!`);
+                    continue;
+                }
+                
+                if ((verwaltungChar.coins || 0) < this.stake) {
+                    ui.notifications.error(game.i18n.localize("FARKLE.notEnoughCoins"));
+                    continue;
+                }
+                
+                const success = await VerwaltungClient.transaction(verwaltungChar.id, -this.stake, `Farkle Game Join: ${this.gameName}`);
+                if (!success) {
+                    ui.notifications.error("Transaction failed. unexpected error.");
+                    continue;
+                }
+                verwaltungId = verwaltungChar.id;
+            } else {
+                // Try to find ID anyway if no stake, for winning later
+                const c = await VerwaltungClient.findCharacter(characterName);
+                if (c) verwaltungId = c.id;
+            }
+
+            users.push({
+                id: playerId,
+                name: characterName,
+                score: 0,
+                character_id: characterUuid,
+                verwaltungId: verwaltungId
+            });
+
+            // Handle loaded dice
+            if (playerRoot) {
+                const diceContainer = playerRoot.querySelector(`.dice-list[data-for-character="${characterUuid}"]`);
+                if (diceContainer) {
+                    // Check for .picked class instead of checkbox
+                    const pickedDice = diceContainer.querySelectorAll('.pickableDie.picked');
+                    if (pickedDice.length > 0) {
+                        const items = await Promise.all(Array.from(pickedDice).map(async (dieDiv) => {
+                           return await fromUuid(dieDiv.dataset.die);
+                        }));
+                        
+                        const loadedDiceValues = items.map(item => {
+                            return item.flags.farkledice.loaded || [1, 1, 1, 1, 1, 1];
+                        });
+                        
+                        // Randomize rotation for loaded dice
+                        const loadedWithIndex = [];
+                        for (let j = 0; j < loadedDiceValues.length; j++) {
+                             let randomIndex = Math.floor(Math.random() * 6);
+                             while (loadedWithIndex[randomIndex]) {
+                                 randomIndex = Math.floor(Math.random() * 6);
+                             }
+                             loadedWithIndex[randomIndex] = loadedDiceValues[j];
+                        }
+                        
+                        cheats[characterUuid] = loadedWithIndex;
+                    }
+                }
+            }
+        }
+        
+        if (users.length === 0) {
+            ui.notifications.warn(game.i18n.localize("FARKLE.noPlayersSelected"));
+            return;
+        }
+        
+        const gameInstance = game.modules.get(moduleName).games[this.gameId];
+        if (gameInstance) {
+            if (Object.keys(cheats).length > 0) {
+                if (!gameInstance.cheats) gameInstance.cheats = {};
+                Object.assign(gameInstance.cheats, cheats);
+                console.log("Farkle | Applied cheats for new game:", cheats);
+            }
+            
+            gameInstance.resetFarkle(users, this.gameName, this.targetScore, this.stake);
+            gameInstance.render(true);
+        }
+        this.close();
+    }
+}

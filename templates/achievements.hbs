@@ -1,0 +1,57 @@
+<div class="farkle-achievements-container">
+    <!-- Header with Post to Chat Button -->
+    <div class="farkle-stats-header">
+        <h3 style="margin: 0; flex: 1; color: var(--color-text-light-1);">{{localize "FARKLE.myAchievements"}}</h3>
+        <button type="button" class="primary" data-action="postToChat">
+            <i class="fas fa-comment"></i> {{localize "FARKLE.postToChat"}}
+        </button>
+    </div>
+
+    <!-- Achievement Progress Overview -->
+    <div class="farkle-achievement-overview">
+        <div class="farkle-achievement-overview-header">
+            <i class="fas fa-medal" style="font-size: 2rem; color: #9f1d1d;"></i>
+            <div>
+                <h3 style="margin: 0; color: var(--color-text-light-1);">{{localize "FARKLE.achievementsTitle"}}</h3>
+                <p style="margin: 4px 0 0; color: var(--color-text-light-4); font-size: 0.9rem;">
+                    {{unlockedCount}} {{localize "FARKLE.unlockedOf"}} {{totalCount}} {{localize "FARKLE.unlocked"}} ({{achievementProgress}}%)
+                </p>
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="farkle-achievement-progress-bar">
+            <div class="farkle-achievement-progress-fill" style="width: {{achievementProgress}}%;"></div>
+        </div>
+    </div>
+
+    <!-- Achievements Grid -->
+    <div class="farkle-achievements-grid">
+        {{#each achievements as |achievement|}}
+        <div class="farkle-achievement-card {{#if achievement.unlocked}}unlocked{{else}}locked{{/if}}">
+            <div class="farkle-achievement-card-icon">{{achievement.icon}}</div>
+            <div class="farkle-achievement-card-content">
+                <div class="farkle-achievement-card-name">
+                    {{achievement.name}}
+                    {{#if achievement.unlocked}}
+                    <i class="fas fa-check-circle" style="color: #2d7c2e; margin-left: 4px;"></i>
+                    {{/if}}
+                </div>
+                <div class="farkle-achievement-card-description">{{achievement.description}}</div>
+                {{#unless achievement.unlocked}}
+                <div class="farkle-achievement-card-progress">
+                    <div class="farkle-achievement-card-progress-bar">
+                        <div class="farkle-achievement-card-progress-fill"
+                            style="width: {{percentage achievement.progress.current achievement.progress.target}}%;">
+                        </div>
+                    </div>
+                    <div class="farkle-achievement-card-progress-text">
+                        {{achievement.progress.current}}/{{achievement.progress.target}}
+                    </div>
+                </div>
+                {{/unless}}
+            </div>
+        </div>
+        {{/each}}
+    </div>
+</div>

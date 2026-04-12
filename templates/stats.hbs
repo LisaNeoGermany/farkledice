@@ -1,0 +1,73 @@
+<div class="farkle-stats-container">
+    <!-- Header with Post to Chat Button -->
+    <div class="farkle-stats-header">
+        <h3 style="margin: 0; flex: 1; color: var(--color-text-light-1);">{{localize "FARKLE.myStats"}}</h3>
+        <button type="button" class="primary" data-action="postToChat">
+            <i class="fas fa-comment"></i> {{localize "FARKLE.postToChat"}}
+        </button>
+    </div>
+
+    <!-- Overall Stats Grid -->
+    <div class="farkle-stats-grid">
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-gamepad"></i></div>
+            <div class="farkle-stat-value">{{stats.gamesPlayed}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.gamesPlayed"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-trophy"></i></div>
+            <div class="farkle-stat-value">{{stats.gamesWon}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.gamesWon"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-percent"></i></div>
+            <div class="farkle-stat-value">{{winRate}}%</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.winRate"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-chart-line"></i></div>
+            <div class="farkle-stat-value">{{averageScore}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.averageScore"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-fire"></i></div>
+            <div class="farkle-stat-value">{{stats.hotDiceCount}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.hotDice"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-star"></i></div>
+            <div class="farkle-stat-value">{{stats.highestTurnScore}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.bestTurn"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-skull"></i></div>
+            <div class="farkle-stat-value">{{stats.farkleCount}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.farkles"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-dice-one"></i></div>
+            <div class="farkle-stat-value">{{stats.singleDieRolls}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.singleDieRolls"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-medal"></i></div>
+            <div class="farkle-stat-value">{{stats.perfectGames}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.perfectGames"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-arrow-up"></i></div>
+            <div class="farkle-stat-value">{{stats.comebacks}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.comebacks"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-calculator"></i></div>
+            <div class="farkle-stat-value">{{stats.totalScore}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.totalScore"}}</div>
+        </div>
+        <div class="farkle-stat-card">
+            <div class="farkle-stat-icon"><i class="fas fa-chart-pie"></i></div>
+            <div class="farkle-stat-value">{{farkleRate}}</div>
+            <div class="farkle-stat-label">{{localize "FARKLE.stats.farklesPerGame"}}</div>
+        </div>
+    </div>
+</div>
