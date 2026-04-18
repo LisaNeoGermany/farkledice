@@ -9,12 +9,14 @@
     {
       "lang": "de",
       "name": "Deutsch",
-      "path": "lang/de.json"
+      "path": "lang/de.json",
+      "flags": {}
     },
     {
       "lang": "en",
       "name": "English",
-      "path": "lang/en.json"
+      "path": "lang/en.json",
+      "flags": {}
     }
   ],
   "esmodules": [
@@ -33,11 +35,18 @@
   "id": "farkledice",
   "authors": [
     {
-      "name": "Cibola8"
+      "name": "Cibola8",
+      "flags": {}
+    },
+    {
+      "name": "Dimensionarium",
+      "flags": {}
     }
   ],
   "styles": [
-    "styles/css/farkle.css"
+    {
+      "src": "styles/css/farkle.css"
+    }
   ],
   "compatibility": {
     "minimum": "13",
@@ -49,8 +58,14 @@
       "label": "Farkle Macros",
       "path": "packs/macros",
       "type": "Macro",
-      "system": "none"
+      "system": "none",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      },
+      "flags": {}
     }
   ],
-  "socket": true
+  "socket": true,
+  "flags": {}
 }
