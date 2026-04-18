@@ -1,122 +1,37 @@
-![Version](https://img.shields.io/github/v/tag/Cibola8/farkledice?label=Version&style=flat-square&color=2577a1) ![Foundry Core Compatible Version](https://img.shields.io/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2FCibola8%2Ffarkledice%2Fmaster%2Fmodule.json&label=Foundry%20Core%20Compatible%20Version&query=$.compatibility.verified&style=flat-square&color=ff6400)
+# Farkle Dice Game
 
+Farkle Dice Game is a Foundry VTT minigame module that brings the classic dice game Farkle to the tabletop for tavern scenes, downtime play, and quick side activities.
 
-# Farkle Dice Game Guide
+## Features
 
-## Foundry VTT V13 Compatibility
+- Full playable Farkle rules inside Foundry VTT
+- Support for hot dice, banking, and farkle failures
+- Score tracking for a complete match flow
+- Optional loaded dice support for custom or cheating dice setups
+- Included macro pack for easy access
+- English and German localization
 
-This module has been fully migrated to **Foundry VTT V13** using modern ApplicationV2 architecture:
+## What the module does
 
-- ✅ ApplicationV2 with HandlebarsApplicationMixin
-- ✅ Proper `activateListeners()` lifecycle hooks (HandlebarsApplicationMixin pattern)
-- ✅ Event delegation via `_onClickAction()`
-- ✅ DialogV2 implementation
-- ✅ LevelDB pack format
-- ✅ Foundry utils API (mergeObject, duplicate, etc.)
+Farkledice adds a lightweight dice minigame to Foundry that can be launched during play without needing an external tool.
 
-**Minimum Required Version:** Foundry VTT V13
+Players roll dice, keep scoring combinations, decide whether to bank points or continue risking the turn, and race toward the target score. The module also supports loaded dice items that can influence probabilities when the GM wants custom behavior.
 
-Bring a touch of medieval mischief to your game night with Farkle, the classic game of luck and risk—now as a quick-play module! Known from Kingdom Come: Deliverance, this ancient pastime is perfect for passing time in a tavern, settling scores over ale, or keeping your group entertained while someone's AFK.
-
-Easy to learn, fast to play, and endlessly addictive—roll the dice, press your luck, and don't farkle out!
-
-Ideal for Foundry VTT side sessions, tavern downtime, or in-game gambling scenes.
-
-![grafik](https://github.com/user-attachments/assets/79565a7c-4a2a-47e8-adc3-a91a7944504e)
-
+This makes it suitable for gambling scenes, tavern games, downtime events, or any campaign moment where a quick in-world dice game fits.
 
 ## Installation
 
-Open **Add-on Modules** in Foundry VTT, click **Install Module**, and paste this manifest URL:
+1. Open **Add-on Modules** in Foundry VTT.
+2. Click **Install Module**.
+3. Paste this manifest URL:
+   `https://github.com/LisaNeoGermany/farkledice/releases/latest/download/module.json`
+4. Click **Install**.
 
-`https://github.com/LisaNeoGermany/farkledice/releases/latest/download/module.json`
+## Compatibility
 
-## Start game
+- Minimum Foundry version: 13
+- Verified Foundry version: 14
 
-Start the game by using the included macro or the button in the settings configuration.
+## Repository
 
-## Overview
-
-Farkle is a classic dice game that combines strategy and luck. Players take turns rolling six dice, aiming to accumulate points through specific combinations. The first player to reach or exceed 10,000 points wins the game.
-
-## Gameplay
-
-1. On your turn, roll all six dice.
-2. After each roll, set aside dice that form scoring combinations.
-3. You may choose to:
-  - **Bank** your accumulated points and end your turn.
-  - **Continue** rolling the remaining dice to try for more points.
-4. If you score with all six dice, you have "hot dice" and may roll all six dice again in the same turn.
-5. If at any point you roll and no scoring combinations appear, you've "Farkled" and lose all points accumulated in that turn.
-
-## Scoring Combinations
-
-| Combination | Points |
-|-------------|--------|
-| Single 1 | 100 |
-| Single 5 | 50 |
-| Three 1s | 1000 |
-| Three 2s | 200 |
-| Three 3s | 300 |
-| Three 4s | 400 |
-| Three 5s | 500 |
-| Three 6s | 600 |
-| Four of a kind | Double the points of three of a kind |
-| Five of a kind | Triple the points of three of a kind |
-| Six of a kind | Quadruple the points of three of a kind |
-| Straight (1-6) | 1500 |
-| Three pairs | 1500 |
-| Two triplets | 2500 |
-| Four of a kind + a pair | 1500 |
-
-## Examples
-
-**Roll:** 1, 1, 1, 5, 5, 2  
-**Scoring:** Three 1s = 1000, Two 5s = 100  
-**Total:** 1100 points
-
-**Roll:** 2, 2, 3, 3, 4, 4  
-**Scoring:** Three pairs = 1500 points
-
-**Roll:** 1, 2, 3, 4, 5, 6  
-**Scoring:** Straight = 1500 points
-
-**Roll:** 2, 3, 4, 6, 6, 2  
-**Scoring:** No scoring combinations  
-**Result:** Farkle (0 points for this turn)
-
-## Loading Dice
-
-The gamemaster can additionally load any dice to cheat the game.
-
-Create loaded dice by opening the load dice window in the ellipsis menu of the header bar of Farkle.
-Drag any Item onto the load window to change the probabilities of the rolls.
-You can give this item to any character or player which should be able to use it. On the start of the game each player can select, which loaded dice should be used for the game.
-
----
-
-## Changelog
-
-### Version 1.1.0-v13 (V13 Migration)
-
-**Full migration to Foundry VTT V13:**
-
-- **Architecture Updates:**
-  - Migrated from FormApplication to ApplicationV2 with HandlebarsApplicationMixin
-  - Retained `activateListeners(html)` lifecycle hooks (correct pattern for HandlebarsApplicationMixin)
-  - Implemented `_onClickAction()` for event delegation
-  - Updated to DialogV2 API
-
-- **API Modernization:**
-  - Migrated to `foundry.utils` namespace (mergeObject, duplicate, isEmpty, getProperty)
-  - Updated pack configuration for LevelDB format
-  - Removed legacy V12 compatibility layer
-
-- **Code Quality:**
-  - Added comprehensive JSDoc documentation to utility functions
-  - Removed deprecated patterns and legacy code
-  - Improved code organization and maintainability
-
-**Breaking Changes:**
-- This version requires Foundry VTT V13 or higher
-- No longer compatible with V12 or earlier versions
+- GitHub: `https://github.com/LisaNeoGermany/farkledice`
