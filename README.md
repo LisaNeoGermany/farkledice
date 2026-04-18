@@ -25,6 +25,12 @@ Ideal for Foundry VTT side sessions, tavern downtime, or in-game gambling scenes
 ![grafik](https://github.com/user-attachments/assets/79565a7c-4a2a-47e8-adc3-a91a7944504e)
 
 
+## Installation
+
+Open **Add-on Modules** in Foundry VTT, click **Install Module**, and paste this manifest URL:
+
+`https://github.com/LisaNeoGermany/farkledice/releases/latest/download/module.json`
+
 ## Start game
 
 Start the game by using the included macro or the button in the settings configuration.
